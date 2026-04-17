@@ -145,3 +145,7 @@ because you can't `grep` a physical timer.
 ## license
 
 mit.
+
+## why no notification daemon
+
+tempo doesn't ship a separate notification daemon. when a session ends, it prints a bell + writes to your status bar / menubar (if enabled) and that's it. desktop notifications across linux/mac/windows is its own can of worms — `notify-send`, `terminal-notifier`, powershell toast — and i don't want to maintain that. the `--bell` already fires `\a` which most terminals route through the OS for you.

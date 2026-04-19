@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .notify import notify
 from .stats import format_duration, summary
 from .store import Session, Store, iso_now
 from .timer import Timer
@@ -34,7 +35,8 @@ def main() -> None:
     help="target duration in minutes.",
 )
 @click.option("--note", "-n", default="", help="optional one-liner about what you're doing.")
-def start(tag: str, duration: int, note: str) -> None:
+@click.option("--no-notify", is_flag=True, help="don't fire a desktop notification at the end.")
+def start(tag: str, duration: int, note: str, no_notify: bool) -> None:
     console = Console()
     if duration <= 0:
         console.print("[red]duration must be positive.[/red]")
@@ -56,15 +58,20 @@ def start(tag: str, duration: int, note: str) -> None:
     )
     Store().append(sess)
 
+    duration_str = format_duration(sess.actual_sec)
+    tag_suffix = f" · {tag}" if tag else ""
     if status == "done":
         console.print(
-            f"\n[green]done.[/green] {format_duration(sess.actual_sec)} of focus"
-            f"{' · ' + tag if tag else ''}."
+            f"\n[green]done.[/green] {duration_str} of focus{tag_suffix}."
         )
+        if not no_notify:
+            notify("tempo — focus done", f"{duration_str}{tag_suffix}. good work.")
     else:
         console.print(
-            f"\n[yellow]aborted.[/yellow] {format_duration(sess.actual_sec)} logged anyway."
+            f"\n[yellow]aborted.[/yellow] {duration_str} logged anyway."
         )
+        if not no_notify:
+            notify("tempo — session aborted", f"{duration_str}{tag_suffix} logged.")
 
 
 @main.command(help="show stats over a time window.")

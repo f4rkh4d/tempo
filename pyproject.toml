@@ -39,9 +39,11 @@ Source = "https://github.com/f4rkh4d/tempo"
 
 [project.scripts]
 tempo = "tempo.cli:main"
+tempo-bar = "tempo.menubar:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+menubar = ["rumps>=0.4; sys_platform == 'darwin'"]
 
 [tool.hatch.version]
 path = "src/tempo/__init__.py"

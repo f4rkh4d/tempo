@@ -42,7 +42,9 @@ class TempoBar:
 
     def __init__(self) -> None:
         self.rumps = _require_rumps()
-        self.app = self.rumps.App("tempo", title="🍅 tempo", quit_button=None)
+        # Use plain text for the menubar title — emoji rendering is
+        # inconsistent across macOS versions and hard to spot when idle.
+        self.app = self.rumps.App("tempo", title="● tempo", quit_button=None)
         self.timer: Optional[Timer] = None
         self.tag: str = ""
         self.started_at_iso: str = ""
@@ -96,6 +98,9 @@ class TempoBar:
         self.ticker = self.rumps.Timer(self._tick, 1)
 
     def run(self) -> None:
+        # fire a startup notification so the user knows it's alive, even if
+        # the menubar is crowded and the icon is hard to spot.
+        notify("tempo-bar started", "look for 🍅 tempo in your menu bar (top right).")
         self.app.run()
 
     # ---- callbacks ----
@@ -198,7 +203,7 @@ class TempoBar:
         self.tag = ""
         self.started_at_iso = ""
         self.ticker.stop()
-        self.app.title = "🍅 tempo"
+        self.app.title = "● tempo"
         self._update_menu_visibility()
 
     def _tick(self, _sender) -> None:
@@ -208,8 +213,8 @@ class TempoBar:
             self._finish(status="done")
             return
         tag_bit = f" {self.tag}" if self.tag else ""
-        paused_bit = " ⏸" if self.timer.is_paused else ""
-        self.app.title = f"🍅{tag_bit} {_fmt_countdown(self.timer.remaining)}{paused_bit}"
+        paused_bit = " (paused)" if self.timer.is_paused else ""
+        self.app.title = f"●{tag_bit} {_fmt_countdown(self.timer.remaining)}{paused_bit}"
 
     def _update_menu_visibility(self) -> None:
         active = self.timer is not None and not self.timer.is_done

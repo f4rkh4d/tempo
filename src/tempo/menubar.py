@@ -49,12 +49,21 @@ class TempoBar:
         self.tag: str = ""
         self.started_at_iso: str = ""
 
-        self.item_start = self.rumps.MenuItem("start 25min", callback=self._on_start)
+        # Live status line shown at the top of the menu (shows while a
+        # session is running — what tag, time remaining, progress).
+        self.status_item = self.rumps.MenuItem("ready.")
+
+        # Today's summary — refreshed when the menu opens.
+        self.today_item = self.rumps.MenuItem("today: 0 sessions")
+
+        self.item_start = self.rumps.MenuItem(
+            "start focus (25 min)", callback=self._on_start
+        )
         self.menu_start_sub = self.rumps.MenuItem("start…")
         for minutes in (15, 25, 45, 60, 90):
             self.menu_start_sub.add(
                 self.rumps.MenuItem(
-                    f"{minutes} min",
+                    f"{minutes} minutes",
                     callback=lambda sender, m=minutes: self._start_session(m, ""),
                 )
             )
@@ -76,13 +85,16 @@ class TempoBar:
         self.item_extend = self.rumps.MenuItem("add 5 min", callback=self._on_extend)
         self.item_abort = self.rumps.MenuItem("abort session", callback=self._on_abort)
         self.item_stats = self.rumps.MenuItem("show stats", callback=self._on_stats)
-        self.item_quit = self.rumps.MenuItem("quit", callback=self._on_quit)
+        self.item_quit = self.rumps.MenuItem("quit tempo-bar", callback=self._on_quit)
 
         self.app.menu = [
+            self.status_item,
+            self.today_item,
+            None,  # separator
             self.item_start,
             self.menu_start_sub,
             self.menu_start_tag,
-            None,  # separator
+            None,
             self.item_pause,
             self.item_extend,
             self.item_abort,
@@ -174,6 +186,7 @@ class TempoBar:
         self.timer = Timer(duration_sec=minutes * 60)
         self.timer.start()
         self.item_pause.title = "pause"
+        self.status_item.title = f"{tag or 'focus'} · starting {minutes} min…"
         self._update_menu_visibility()
         self.ticker.start()
 
@@ -204,6 +217,8 @@ class TempoBar:
         self.started_at_iso = ""
         self.ticker.stop()
         self.app.title = "● tempo"
+        self.status_item.title = "ready."
+        self._refresh_today()
         self._update_menu_visibility()
 
     def _tick(self, _sender) -> None:
@@ -214,7 +229,44 @@ class TempoBar:
             return
         tag_bit = f" {self.tag}" if self.tag else ""
         paused_bit = " (paused)" if self.timer.is_paused else ""
-        self.app.title = f"●{tag_bit} {_fmt_countdown(self.timer.remaining)}{paused_bit}"
+        remaining_str = _fmt_countdown(self.timer.remaining)
+        self.app.title = f"●{tag_bit} {remaining_str}{paused_bit}"
+
+        # Refresh the live status line inside the menu too (so when the user
+        # clicks the icon they see exactly what's running and how far in).
+        pct = int(self.timer.progress * 100)
+        self.status_item.title = (
+            f"{self.tag or 'focus'} · {remaining_str} left · {pct}%"
+            f"{' · paused' if self.timer.is_paused else ''}"
+        )
+
+        # Today's summary updates less often but it's cheap.
+        self._refresh_today()
+
+    def _refresh_today(self) -> None:
+        from datetime import datetime, timezone
+        from .stats import format_duration
+        try:
+            today = datetime.now(timezone.utc).astimezone().date()
+            total = 0
+            count = 0
+            for s in Store().all():
+                try:
+                    d = datetime.fromisoformat(s.started_at).astimezone().date()
+                except Exception:  # noqa: BLE001
+                    continue
+                if d == today:
+                    count += 1
+                    total += int(s.actual_sec or 0)
+            if count == 0:
+                self.today_item.title = "today: no sessions yet"
+            else:
+                self.today_item.title = (
+                    f"today: {format_duration(total)} · "
+                    f"{count} session{'' if count == 1 else 's'}"
+                )
+        except Exception:  # noqa: BLE001
+            self.today_item.title = "today: —"
 
     def _update_menu_visibility(self) -> None:
         active = self.timer is not None and not self.timer.is_done

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tempo"
 dynamic = ["version"]
-description = "pretty pomodoro timer for the terminal. sessions, tags, weekly stats."
+description = "pretty pomodoro timer for the terminal. sessions, tags, heatmap, streaks, macos menubar companion."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }

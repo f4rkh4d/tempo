@@ -2,22 +2,33 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import click
-from rich.console import Console
+from rich.align import Align
+from rich.console import Console, Group
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from . import __version__
 from .notify import notify
-from .stats import format_duration, summary
+from .stats import (
+    HEATMAP_SHADES,
+    current_streak,
+    format_duration,
+    heatmap_cells,
+    longest_streak,
+    summary,
+)
 from .store import Session, Store, iso_now
 from .timer import Timer
 from .ui import run_session
 
 
 @click.group(
-    help="pretty pomodoro timer for the terminal. sessions, tags, weekly stats.",
+    help="pretty pomodoro timer for the terminal. sessions, tags, heatmap, streaks.",
 )
 @click.version_option(version=__version__, prog_name="tempo")
 def main() -> None:
@@ -74,30 +85,186 @@ def start(tag: str, duration: int, note: str, no_notify: bool) -> None:
             notify("tempo — session aborted", f"{duration_str}{tag_suffix} logged.")
 
 
-@main.command(help="show stats over a time window.")
+@main.command(help="show stats over a time window + calendar heatmap + streaks.")
 @click.option(
     "--window",
     type=click.Choice(["day", "week", "month", "all"]),
     default="week",
     show_default=True,
 )
-def stats(window: str) -> None:
+@click.option(
+    "--no-heatmap",
+    is_flag=True,
+    help="skip the 90-day calendar heatmap.",
+)
+def stats(window: str, no_heatmap: bool) -> None:
     console = Console()
     store = Store()
-    summ = summary(store.all(), window=window)
+    all_sessions = store.all()
+    summ = summary(all_sessions, window=window)
 
-    if summ.session_count == 0:
-        console.print(f"no sessions in the {summ.window_label}.")
+    if summ.session_count == 0 and not all_sessions:
+        console.print("no sessions yet. run `tempo start` to record one.")
         return
 
-    console.print(
-        f"{summ.window_label}: [bold]{summ.format_total()}[/bold] "
-        f"across {summ.session_count} session{'' if summ.session_count == 1 else 's'}."
+    # Headline ----------------------------------------------------------------
+    streak_now = current_streak(all_sessions)
+    streak_max = longest_streak(all_sessions)
+
+    kpi = Table.grid(padding=(0, 2))
+    kpi.add_column(justify="left")
+    kpi.add_row(
+        _kpi("focus", summ.format_total(), "cyan"),
+        _kpi("sessions", str(summ.session_count), "cyan"),
+        _kpi("streak", _streak_text(streak_now), "green"),
+        _kpi("best", _streak_text(streak_max), "magenta"),
     )
-    table = Table(show_header=False, box=None, padding=(0, 1))
-    for tag, seconds, bar in summ.bars(width=24):
-        table.add_row(tag, format_duration(seconds), f"[cyan]{bar}[/cyan]")
-    console.print(table)
+
+    console.print()
+    console.print(
+        Panel(
+            Align.center(kpi),
+            title=Text(f" {summ.window_label} ", style="bold cyan"),
+            border_style="grey30",
+            padding=(1, 2),
+        )
+    )
+
+    # Tag breakdown -----------------------------------------------------------
+    if summ.by_tag_sec:
+        bars_table = Table(show_header=False, box=None, padding=(0, 2))
+        bars_table.add_column("tag", style="bold")
+        bars_table.add_column("dur", justify="right")
+        bars_table.add_column("bar")
+        for tag, seconds, bar in summ.bars(width=28):
+            bars_table.add_row(tag, format_duration(seconds), f"[cyan]{bar}[/cyan]")
+
+        console.print()
+        console.print(
+            Panel(bars_table, title="[bold]by tag[/bold]", border_style="grey30", padding=(1, 2))
+        )
+
+    # Heatmap -----------------------------------------------------------------
+    if not no_heatmap:
+        cells = heatmap_cells(all_sessions, days=90)
+        console.print()
+        console.print(
+            Panel(
+                _render_heatmap(cells),
+                title="[bold]last 90 days[/bold]",
+                border_style="grey30",
+                padding=(1, 2),
+            )
+        )
+
+
+def _kpi(label: str, value: str, color: str = "cyan") -> Table:
+    t = Table.grid()
+    t.add_column()
+    t.add_row(Text(value, style=f"bold {color}"))
+    t.add_row(Text(label.upper(), style="grey62"))
+    return t
+
+
+def _streak_text(days: int) -> str:
+    return f"{days} day{'s' if days != 1 else ''}"
+
+
+def _render_heatmap(cells) -> Text:
+    """Render the heatmap as a 7-row grid (Mon → Sun), one column per week.
+
+    Uses a solid foreground block (▇▇) per cell — renders reliably even when
+    rich strips background colors (piped output, some terminals).
+    """
+    if not cells:
+        return Text("no data yet.", style="grey62")
+
+    # Group cells into columns-of-7 (weeks). First column is padded with None
+    # before Monday so all columns land in the right row slot.
+    weeks: list[list] = []
+    for day, seconds, shade in cells:
+        weekday = day.weekday()  # Mon=0 .. Sun=6
+        if not weeks or len(weeks[-1]) == 7:
+            column: list = []
+            if not weeks:
+                for _ in range(weekday):
+                    column.append(None)
+            weeks.append(column)
+        weeks[-1].append((day, seconds, shade))
+
+    while weeks and len(weeks[-1]) < 7:
+        weeks[-1].append(None)
+
+    labels = ["mon", "", "wed", "", "fri", "", "sun"]
+    t = Text()
+    for row_idx, label in enumerate(labels):
+        t.append(f" {label:<3} ", style="grey62")
+        for col in weeks:
+            cell = col[row_idx]
+            if cell is None:
+                t.append("   ")
+            else:
+                _, _, shade = cell
+                t.append("▇▇", style=HEATMAP_SHADES[shade])
+                t.append(" ")
+        t.append("\n")
+
+    # Legend.
+    t.append("\n     less  ")
+    for shade in range(5):
+        t.append("▇▇", style=HEATMAP_SHADES[shade])
+        t.append(" ")
+    t.append(" more")
+    return t
+
+
+@main.command(help="today's focus so far — quick glance.")
+def today() -> None:
+    console = Console()
+    all_sessions = Store().all()
+    today_d = datetime.now(timezone.utc).astimezone().date()
+
+    today_sessions = []
+    total = 0
+    tags_sec = {}
+    for s in all_sessions:
+        try:
+            d = datetime.fromisoformat(s.started_at).astimezone().date()
+        except Exception:  # noqa: BLE001
+            continue
+        if d != today_d:
+            continue
+        today_sessions.append(s)
+        total += int(s.actual_sec or 0)
+        tags_sec[s.tag or "untagged"] = tags_sec.get(s.tag or "untagged", 0) + int(s.actual_sec or 0)
+
+    if not today_sessions:
+        console.print("no sessions today yet. try `tempo start`.")
+        return
+
+    streak = current_streak(all_sessions)
+
+    kpi = Table.grid(padding=(0, 2))
+    kpi.add_column()
+    kpi.add_row(
+        _kpi("today", format_duration(total), "cyan"),
+        _kpi("sessions", str(len(today_sessions)), "cyan"),
+        _kpi("streak", _streak_text(streak), "green"),
+    )
+
+    tag_table = Table(show_header=False, box=None, padding=(0, 2))
+    for tag, sec in sorted(tags_sec.items(), key=lambda x: -x[1]):
+        tag_table.add_row(f"[bold]{tag}[/bold]", format_duration(sec))
+
+    console.print()
+    console.print(
+        Panel(
+            Group(Align.center(kpi), Text(""), tag_table),
+            title="[bold]today[/bold]",
+            border_style="grey30",
+            padding=(1, 2),
+        )
+    )
 
 
 @main.command(help="list recent sessions.")
@@ -109,10 +276,10 @@ def ls(limit: int) -> None:
         console.print("no sessions yet. run `tempo start`.")
         return
 
-    table = Table(show_header=True, header_style="bold")
+    table = Table(show_header=True, header_style="bold", border_style="grey30")
     table.add_column("when")
     table.add_column("tag")
-    table.add_column("duration")
+    table.add_column("duration", justify="right")
     table.add_column("status")
     for s in sessions:
         when = s.started_at[:16].replace("T", " ")

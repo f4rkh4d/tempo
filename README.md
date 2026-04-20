@@ -100,9 +100,9 @@ tempo clear
 
 when a session ends (completed or aborted), tempo fires a native desktop notification so you don't have to be staring at the terminal.
 
-- **macos** — uses `osascript`. ships with the OS, no setup.
-- **linux** — uses `notify-send` if installed. skipped silently otherwise.
-- **windows** — not wired up yet.
+- **macos**. uses `osascript`. ships with the OS, no setup.
+- **linux**. uses `notify-send` if installed. skipped silently otherwise.
+- **windows**. not wired up yet.
 
 disable per-session with `--no-notify`.
 
@@ -124,7 +124,7 @@ sessions from cli + menubar share the same `~/.tempo/sessions.jsonl` store, so h
 
 `tempo stats` shows a **current streak** (consecutive days with at least one session, counted from today or yesterday) and a **best streak** (longest streak you've ever had).
 
-same psychology as the github contribution graph — missing a day hurts.
+same psychology as the github contribution graph. missing a day hurts.
 
 ## where sessions are stored
 
